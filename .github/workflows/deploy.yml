@@ -24,16 +24,46 @@ jobs:
         with:
           node-version: 20
 
-      - name: Install (client)
-        run: npm install
-        working-directory: client
+      - name: Install deps (root and/or client)
+        run: |
+          set -e
+          if [ -f package-lock.json ]; then npm ci; elif [ -f package.json ]; then npm install; fi
+          if [ -f client/package-lock.json ]; then npm ci --prefix client; elif [ -f client/package.json ]; then npm install --prefix client; fi
 
-      - name: Build (client)
-        run: npm run build
-        working-directory: client
+      - name: Build (try root, fallback to client)
+        run: |
+          set -e
+          if [ -f package.json ]; then
+            npm run build || true
+          fi
+          if [ ! -f dist/index.html ] && [ ! -f build/index.html ] && [ -f client/package.json ]; then
+            npm --prefix client run build || true
+          fi
+
+      - name: Find built index.html and prepare site
+        run: |
+          set -e
+          INDEX_PATH="$(find . -maxdepth 6 -type f -name index.html \( -path "*/dist/index.html" -o -path "*/build/index.html" \) | head -n 1)"
+          if [ -z "$INDEX_PATH" ]; then
+            echo "ERROR: index.html not found after build."
+            echo "Repo root:"
+            ls -la
+            echo "client:"
+            ls -la client || true
+            echo "Possible build dirs:"
+            find . -maxdepth 4 -type d -name dist -o -name build
+            exit 1
+          fi
+
+          OUT_DIR="$(dirname "$INDEX_PATH")"
+          echo "Using build output dir: $OUT_DIR"
+
+          rm -rf site
+          mkdir -p site
+          cp -R "$OUT_DIR"/. site/
 
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: client/dist
+          path: site
       - uses: actions/deploy-pages@v4
